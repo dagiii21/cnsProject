@@ -13,7 +13,6 @@ CORS(app)
 import base64
 
 def otp_encrypt(message: str, key: str) -> str:
-    """Proper OTP Encryption with string key handling"""
     # Convert both message and key to bytes
     message_bytes = message.encode('utf-8')
     key_bytes = key.encode('utf-8')  # Convert string key to bytes
@@ -28,7 +27,6 @@ def otp_encrypt(message: str, key: str) -> str:
     return base64.b64encode(encrypted_bytes).decode('utf-8')
 
 def otp_decrypt(ciphertext: str, key: str) -> str:
-    """Proper OTP Decryption with string key handling"""
     encrypted_bytes = base64.b64decode(ciphertext)
     key_bytes = key.encode('utf-8')  # Convert string key to bytes
     
@@ -44,7 +42,6 @@ def pad_key(key, required_length):
         return key.ljust(required_length, '\0')  # pad with null bytes
     return key[:required_length]  # trim if too long
 
-# 3DES Encryption and Decryption
 # 3DES Encryption and Decryption
 def des3_encrypt(message, key):
     key = pad_key(key, 24).encode()  # Ensure key is bytes

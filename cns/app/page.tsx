@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 
 export default function Form() {
-  const [number, setNumber] = useState("");
+  const [message, setMessage] = useState("");
   const [key, setKey] = useState("");
   const [operation, setOperation] = useState("encrypt");
   const [algorithm, setAlgorithm] = useState("otp");
@@ -15,8 +15,10 @@ export default function Form() {
   useEffect(() => {
     let placeholder = operation === "encrypt" ? "Enter encryption key" : "Enter decryption key";
     
-    if (algorithm === "otp" && operation === 'encrypt' ) {
-      placeholder += ` (${number.length} characters)`;
+    if (algorithm === "rsa") {
+      placeholder = "RSA uses server keys - no input needed";
+    } else if (algorithm === "otp" && operation === 'encrypt') {
+      placeholder += ` (${message.length} characters)`;
     } else if (algorithm === "3des") {
       placeholder += " (16 or 24 characters)";
     } else if (algorithm === "aes") {
@@ -24,35 +26,30 @@ export default function Form() {
     }
     
     setKeyPlaceholder(placeholder);
-  }, [algorithm, operation, number.length]);
+  }, [algorithm, operation, message.length]);
 
   // Auto-adjust OTP key length when message changes
   useEffect(() => {
-    if ((algorithm === "otp" && number.length !== key.length) && operation === 'encrypt') {
-      setKey(prev => {
-        if (prev.length > number.length) {
-          return prev.slice(0, number.length);
-        }
-        return prev.padEnd(number.length, ""); // Pad with zeros by default
-      });
+    if (algorithm === "otp" && message.length !== key.length && operation === 'encrypt') {
+      setKey(prev => prev.slice(0, message.length).padEnd(message.length, "0"));
     }
-  }, [number, algorithm]);
+  }, [message, algorithm]);
 
   const validateInputs = () => {
     setError("");
 
-    if (!number) {
+    if (!message) {
       setError("Message cannot be empty");
       return false;
     }
 
-    if (!key) {
+    if (algorithm !== "rsa" && !key) {
       setError("Key cannot be empty");
       return false;
     }
 
     if (algorithm === "otp" && operation === 'encrypt') {
-      if (key.length !== number.length) {
+      if (key.length !== message.length) {
         setError("For OTP, key length must match message length");
         return false;
       }
@@ -63,7 +60,6 @@ export default function Form() {
         return false;
       }
 
-      // Check for weak keys (simple frontend check)
       if (key.length === 16 && key.slice(0, 8) === key.slice(8, 16)) {
         setError("Weak 3DES key: First and second parts are identical");
         return false;
@@ -86,25 +82,21 @@ export default function Form() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!validateInputs()) {
-      return;
-    }
+    if (!validateInputs()) return;
 
     const endpoint = operation === "encrypt" ? "encrypt" : "decrypt";
     const url = `http://localhost:5000/${endpoint}`;
 
     const payload = {
-      message: number,
-      key: key,
-      algorithm: algorithm
+      message: message,
+      algorithm: algorithm,
+      ...(algorithm !== "rsa" && { key: key }) // Only include key for non-RSA
     };
 
     try {
       const response = await fetch(url, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
 
@@ -114,106 +106,109 @@ export default function Form() {
       }
 
       const data = await response.json();
-      setResult(data.encrypted_message || data.decrypted_message ||"No result received");
+      setResult(data.encrypted_message || data.decrypted_message || "No result received");
       setError("");
     } catch (error) {
       setResult("");
-      setError(error.message || "An error occurred");
+      if (error instanceof Error) {
+        setError(error.message || "An error occurred");
+      } else {
+        setError("An error occurred");
+      }
     }
   };
 
   return (
-    <div className="min-h-screen flex flex-col justify-center items-center bg-gray-700">
+    <div className="min-h-screen flex flex-col justify-center items-center bg-gray-700 p-4">
       <form
-        className="bg-gray-300 shadow-md rounded px-20 pt-18 pb-8 mb-4"
+        className="bg-gray-300 shadow-md rounded-lg px-8 pt-6 pb-8 mb-4 w-full max-w-2xl"
         onSubmit={handleSubmit}
       >
-        <h1 className="text-2xl text-gray-700 font-bold mb-4">Encrypt / Decrypt</h1>
+        <h1 className="text-2xl text-gray-700 font-bold mb-6 text-center">
+          {operation.toUpperCase()} WITH {algorithm.toUpperCase()}
+        </h1>
 
-        {/* Error Message Display */}
         {error && (
-          <div className="mb-4 p-2 bg-red-100 border border-red-400 text-red-700 rounded">
+          <div className="mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded-lg">
             {error}
           </div>
         )}
 
-        {/* Text Field for Message */}
-        <div className="mb-4">
+        <div className="mb-6">
           <label className="block text-gray-700 text-sm font-bold mb-2">
             Message
           </label>
-          <input
-            type="text"
-            placeholder="Enter message"
-            value={number}
-            onChange={(e) => setNumber(e.target.value)}
-            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+          <textarea
+            placeholder={`Enter message to ${operation}`}
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline h-32 resize-none"
           />
         </div>
 
-        {/* Text Field for Key */}
-        <div className="mb-4">
-          <label className="block text-gray-700 text-sm font-bold mb-2">
-            {operation === "encrypt" ? "Encryption Key" : "Decryption Key"}
-          </label>
-          <input
-            type="text"
-            placeholder={keyPlaceholder}
-            value={key}
-            onChange={(e) => setKey(e.target.value)}
-            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-          />
+        {algorithm !== "rsa" && (
+          <div className="mb-6">
+            <label className="block text-gray-700 text-sm font-bold mb-2">
+              {operation === "encrypt" ? "Encryption Key" : "Decryption Key"}
+            </label>
+            <input
+              type="text"
+              placeholder={keyPlaceholder}
+              value={key}
+              onChange={(e) => setKey(e.target.value)}
+              className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+            />
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 gap-4 mb-6">
+          <div>
+            <label className="block text-gray-700 text-sm font-bold mb-2">
+              Algorithm
+            </label>
+            <select
+              value={algorithm}
+              onChange={(e) => setAlgorithm(e.target.value)}
+              className="shadow appearance-none border rounded w-full py-2 px-3 bg-gray-700 text-white focus:outline-none focus:shadow-outline"
+            >
+              <option value="otp">OTP</option>
+              <option value="3des">3DES</option>
+              <option value="aes">AES</option>
+              <option value="rsa">RSA</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-gray-700 text-sm font-bold mb-2">
+              Operation
+            </label>
+            <select
+              value={operation}
+              onChange={(e) => setOperation(e.target.value)}
+              className="shadow appearance-none border rounded w-full py-2 px-3 bg-gray-700 text-white focus:outline-none focus:shadow-outline"
+            >
+              <option value="encrypt">Encrypt</option>
+              <option value="decrypt">Decrypt</option>
+            </select>
+          </div>
         </div>
 
-        {/* Algorithm Selection */}
-        <div className="mb-4">
-          <label className="block text-gray-700 text-sm font-bold mb-2">
-            Choose Algorithm
-          </label>
-          <select
-            value={algorithm}
-            onChange={(e) => setAlgorithm(e.target.value)}
-            className="shadow appearance-none border rounded w-full py-2 px-3 bg-gray-700 text-white leading-tight focus:outline-none focus:shadow-outline"
-          >
-            <option value="otp">OTP</option>
-            <option value="3des">3DES</option>
-            <option value="aes">AES</option>
-          </select>
-        </div>
-
-        {/* Operation Selection */}
-        <div className="mb-4">
-          <label className="block text-gray-700 text-sm font-bold mb-2">
-            Choose Operation
-          </label>
-          <select
-            value={operation}
-            onChange={(e) => setOperation(e.target.value)}
-            className="shadow appearance-none border rounded w-full py-2 px-3 bg-gray-700 text-white leading-tight focus:outline-none focus:shadow-outline"
-          >
-            <option value="encrypt">Encrypt</option>
-            <option value="decrypt">Decrypt</option>
-          </select>
-        </div>
-
-        {/* Submit Button */}
         <button
           type="submit"
-          className="bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline"
+          className="w-full bg-gray-700 hover:bg-gray-600 text-white font-bold py-3 px-4 rounded-lg focus:outline-none focus:shadow-outline transition-colors"
         >
-          {operation === "encrypt" ? "Encrypt" : "Decrypt"}
+          {operation === "encrypt" ? "ENCRYPT NOW" : "DECRYPT NOW"}
         </button>
 
-        {/* Result Display */}
-        <div className="rounded px-6 pt-4 pb-4 mt-4 w-full max-w-md">
+        <div className="mt-6">
           <label className="block text-gray-700 text-sm font-bold mb-2">
             Result
           </label>
-          <input
-            type="text"
+          <textarea
             value={result}
             readOnly
-            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline bg-gray-100"
+            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline bg-gray-100 h-48 resize-none"
+            placeholder={`${operation === "encrypt" ? "Encrypted" : "Decrypted"} result will appear here...`}
           />
         </div>
       </form>

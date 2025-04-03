@@ -1,16 +1,13 @@
 from flask import Flask, request, jsonify
-from Crypto.Cipher import DES3, AES
+from Crypto.Cipher import DES3, AES, PKCS1_OAEP
+from Crypto.PublicKey import RSA
 from Crypto.Random import get_random_bytes
 from Crypto.Util.Padding import pad, unpad
 from flask_cors import CORS 
 import base64
 
 app = Flask(__name__)
-
-
 CORS(app)
-
-import base64
 
 def otp_encrypt(message: str, key: str) -> str:
     # Convert both message and key to bytes
@@ -71,39 +68,99 @@ def aes_decrypt(encrypted_message, key):
     return unpad(decrypted, AES.block_size).decode()
  
 
+
+
+CHUNK_SIZE = 214  # Max bytes for 2048-bit RSA with PKCS1_OAEP (245 bytes - overhead)
+
+def rsa_encrypt(message: str) -> str:
+    try:
+        with open('public_key.pem', 'r') as f:
+            public_key = RSA.import_key(f.read())
+        cipher = PKCS1_OAEP.new(public_key)
+        
+        # Split message into chunks
+        message_bytes = message.encode('utf-8')
+        chunks = [message_bytes[i:i+CHUNK_SIZE] for i in range(0, len(message_bytes), CHUNK_SIZE)]
+        
+        encrypted_chunks = []
+        for chunk in chunks:
+            encrypted = cipher.encrypt(chunk)
+            encrypted_chunks.append(base64.b64encode(encrypted).decode('utf-8'))
+        
+        return ','.join(encrypted_chunks)  # Join chunks with a delimiter
+    
+    except Exception as e:
+        raise ValueError(f"RSA encryption error: {str(e)}")
+
+def rsa_decrypt(ciphertext: str) -> str:
+    try:
+        with open('private_key.pem', 'r') as f:
+            private_key = RSA.import_key(f.read())
+        cipher = PKCS1_OAEP.new(private_key)
+        
+        # Split encrypted chunks
+        encrypted_chunks = ciphertext.split(',')
+        decrypted_bytes = bytearray()
+        
+        for chunk in encrypted_chunks:
+            encrypted = base64.b64decode(chunk)
+            decrypted = cipher.decrypt(encrypted)
+            decrypted_bytes.extend(decrypted)
+        
+        return decrypted_bytes.decode('utf-8')
+    
+    except Exception as e:
+        raise ValueError(f"RSA decryption error: {str(e)}")
+
 @app.route('/encrypt', methods=['POST'])
 def encrypt():
     data = request.json
-    message = data['message']
-    key = data['key']
-    algorithm = data['algorithm']
+    message = data.get('message')
+    algorithm = data.get('algorithm')
+    key = data.get('key', '')  # Default empty for RSA
 
-    if algorithm == 'otp':
-        encrypted_message = otp_encrypt(message, key)
-    elif algorithm == '3des':
-        encrypted_message = des3_encrypt(message, key)
-    elif algorithm == 'aes':
-        encrypted_message = aes_encrypt(message, key)
-    else:
-        return jsonify({'error': 'Invalid algorithm'}), 400
+    if not message or not algorithm:
+        return jsonify({'error': 'Missing message or algorithm'}), 400
+
+    try:
+        if algorithm == 'otp':
+            encrypted_message = otp_encrypt(message, key)
+        elif algorithm == '3des':
+            encrypted_message = des3_encrypt(message, key)
+        elif algorithm == 'aes':
+            encrypted_message = aes_encrypt(message, key)
+        elif algorithm == 'rsa':
+            encrypted_message = rsa_encrypt(message)
+        else:
+            return jsonify({'error': 'Invalid algorithm'}), 400
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
 
     return jsonify({'encrypted_message': encrypted_message})
 
 @app.route('/decrypt', methods=['POST'])
 def decrypt():
     data = request.json
-    message = data['message']
-    key = data['key']
-    algorithm = data['algorithm']
+    message = data.get('message')
+    algorithm = data.get('algorithm')
+    key = data.get('key', '')  # Default empty for RSA
 
-    if algorithm == 'otp':
-        decrypted_message = otp_decrypt(message, key)
-    elif algorithm == '3des':
-        decrypted_message = des3_decrypt(message, key)
-    elif algorithm == 'aes':
-        decrypted_message = aes_decrypt(message, key)
-    else:
-        return jsonify({'error': 'Invalid algorithm'}), 400
+    if not message or not algorithm:
+        return jsonify({'error': 'Missing message or algorithm'}), 400
+
+    try:
+        if algorithm == 'otp':
+            decrypted_message = otp_decrypt(message, key)
+        elif algorithm == '3des':
+            decrypted_message = des3_decrypt(message, key)
+        elif algorithm == 'aes':
+            decrypted_message = aes_decrypt(message, key)
+        elif algorithm == 'rsa':
+            decrypted_message = rsa_decrypt(message)
+        else:
+            return jsonify({'error': 'Invalid algorithm'}), 400
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
 
     return jsonify({'decrypted_message': decrypted_message})
 
